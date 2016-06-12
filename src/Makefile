@@ -8,11 +8,11 @@ else
 all : mosquitto
 endif
 
-mosquitto : mosquitto.o bridge.o conf.o context.o database.o logging.o loop.o memory_mosq.o persist.o net.o net_mosq.o read_handle.o read_handle_client.o read_handle_server.o read_handle_shared.o security.o security_default.o send_client_mosq.o send_mosq.o send_server.o service.o subs.o sys_tree.o time_mosq.o tls_mosq.o util_mosq.o websockets.o will_mosq.o
-	${CROSS_COMPILE}${CC} $^ -o $@ ${LDFLAGS} $(BROKER_LIBS)
+mosquitto : mosquitto.o bridge.o conf.o context.o database.o logging.o loop.o memory_mosq.o persist.o net.o net_mosq.o read_handle.o read_handle_client.o read_handle_server.o read_handle_shared.o security.o security_default.o send_client_mosq.o send_mosq.o send_server.o service.o subs.o sys_tree.o time_mosq.o tls_mosq.o util_mosq.o websockets.o will_mosq.o client_shared.o management.o
+	${CROSS_COMPILE}${CC} $^ -o $@ ${CLIENT_LDFLAGS} $(BROKER_LIBS) -lpthread -lmysqlclient
 
 mosquitto.o : mosquitto.c mosquitto_broker.h
-	${CROSS_COMPILE}${CC} $(BROKER_CFLAGS) -c $< -o $@
+	${CROSS_COMPILE}${CC} $(BROKER_CFLAGS) -c $< -o $@ -I /usr/include/mysql -L /usr/lib/mysql 
 
 bridge.o : bridge.c mosquitto_broker.h
 	${CROSS_COMPILE}${CC} $(BROKER_CFLAGS) -c $< -o $@
@@ -50,8 +50,8 @@ read_handle.o : read_handle.c mosquitto_broker.h
 read_handle_client.o : read_handle_client.c mosquitto_broker.h
 	${CROSS_COMPILE}${CC} $(BROKER_CFLAGS) -c $< -o $@
 
-read_handle_server.o : read_handle_server.c mosquitto_broker.h
-	${CROSS_COMPILE}${CC} $(BROKER_CFLAGS) -c $< -o $@
+read_handle_server.o : read_handle_server.c mosquitto_broker.h 
+	${CROSS_COMPILE}${CC} $(BROKER_CFLAGS) -c $< -o $@ -I /usr/include/mysql -L /usr/lib/mysql 
 
 read_handle_shared.o : ../lib/read_handle_shared.c ../lib/read_handle.h
 	${CROSS_COMPILE}${CC} $(BROKER_CFLAGS) -c $< -o $@
@@ -100,6 +100,18 @@ mosquitto_passwd : mosquitto_passwd.o
 
 mosquitto_passwd.o : mosquitto_passwd.c
 	${CROSS_COMPILE}${CC} $(CFLAGS) ${CPPFLAGS} -c $< -o $@
+
+pub_client.o : pub_client.c pub_client.h
+	${CROSS_COMPILE}${CC} -c $< -o $@ ${CLIENT_CFLAGS}
+
+sub_client.o : sub_client.c sub_client.h
+	${CROSS_COMPILE}${CC} -c $< -o $@ ${CLIENT_CFLAGS}
+
+client_shared.o : client_shared.c client_shared.h
+	${CROSS_COMPILE}${CC} -c $< -o $@ ${CLIENT_CFLAGS}
+
+management.o : management.c management.h 
+	${CROSS_COMPILE}${CC} $(BROKER_CFLAGS) -c $< -o $@ -I /usr/include/mysql -L /usr/lib/mysql 
 
 install : all
 	$(INSTALL) -d ${DESTDIR}$(prefix)/sbin

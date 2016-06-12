@@ -26,6 +26,10 @@ Contributors:
 #include <time_mosq.h>
 #include <tls_mosq.h>
 #include <util_mosq.h>
+#include "management.h"
+#include "client_shared.h"
+#include "pub_client.c"
+#include "sub_client.c"
 
 #ifdef WITH_UUID
 #  include <uuid/uuid.h>
@@ -94,6 +98,8 @@ int mqtt3_handle_connect(struct mosquitto_db *db, struct mosquitto *context)
 	int slen;
 	struct _mosquitto_subleaf *leaf;
 	int i;
+	struct client_config *pub_config;
+	struct client_config *sub_config;
 #ifdef WITH_TLS
 	X509 *client_cert = NULL;
 	X509_NAME *name;
@@ -506,6 +512,49 @@ int mqtt3_handle_connect(struct mosquitto_db *db, struct mosquitto *context)
 				_mosquitto_log_printf(NULL, MOSQ_LOG_NOTICE, "New client connected from %s as %s (c%d, k%d, u'%s').", context->address, client_id, clean_session, context->keepalive, context->username);
 			}else{
 				_mosquitto_log_printf(NULL, MOSQ_LOG_NOTICE, "New client connected from %s as %s (c%d, k%d).", context->address, client_id, clean_session, context->keepalive);
+	
+				// If cline is Slave Broker
+				if(checkSlaveId(client_id)){
+					int index=0, i=5;
+					while(client_id[i]){
+						index =index * 10;
+						index = index + (int)(client_id[i++] - '0');
+					}
+					printf("client id : %s, index = %d\n", client_id, index);
+ if(pMosq[index]==NULL){
+                printf("index null, client id : %s, index = %d\n", context->id, index);
+                        pMosq[index]= (struct mosquitto*)malloc(sizeof(struct mosquitto));
+                }
+
+					pMosq[index] = context;
+					updateIPAddr(client_id, context->address, context->listener->port, context->sock);
+					sub_config = malloc(sizeof(struct client_config));
+					pub_config = malloc(sizeof(struct client_config));
+/*
+					if(!strcmp(client_id, "Slave1")){
+						sub_config->host = strdup("163.180.117.97");
+						sub_config->port = 1883;
+						sub_config->topic = strdup("NAMU");
+						//subscribeThread(sub_config);
+						//publishThread(sub_config);
+					}
+*/
+				}
+				// mositor
+				else if(!strcmp(client_id, "monitor") || !strcmp(client_id, "monitor1")){}
+				// if client is end node
+				else{
+					
+				/*
+					char slaveInfo[32];
+					strcpy(slaveInfo, "163.180.117.97");
+					getSlaveInfo(slaveInfo);
+					printf("client_id : %s\n", client_id);
+					printf("slaveInfo : %s\n", slaveInfo);
+					systemPublish(context, slaveInfo);
+					close(context->sock);
+				*/
+				}
 			}
 		}
 	}
@@ -567,6 +616,8 @@ handle_connect_error:
 	if(client_cert) X509_free(client_cert);
 #endif
 	/* We return an error here which means the client is freed later on. */
+	if(checkSlaveId(client_id))
+		systemSubscribe(db,context, "NAMU/SYSTEM/PUBLISH/RELAY");
 	return rc;
 }
 
@@ -602,7 +653,6 @@ int mqtt3_handle_subscribe(struct mosquitto_db *db, struct mosquitto *context)
 	uint32_t payloadlen = 0;
 	int len;
 	char *sub_mount;
-
 	if(!context) return MOSQ_ERR_INVAL;
 	_mosquitto_log_printf(NULL, MOSQ_LOG_DEBUG, "Received SUBSCRIBE from %s", context->id);
 	/* FIXME - plenty of potential for memory leaks here */
@@ -695,13 +745,26 @@ int mqtt3_handle_subscribe(struct mosquitto_db *db, struct mosquitto *context)
 #endif
 
 			if(qos != 0x80){
+				printf("{client_id : '%s', client_address : '%s', topic : '%s', log_type : '%s'}",context->id, context->address, sub, "subscribe");
 				rc2 = mqtt3_sub_add(db, context, sub, qos, &db->subs);
+
+
+
 				if(rc2 == MOSQ_ERR_SUCCESS){
 					if(mqtt3_retain_queue(db, context, sub, qos)) rc = 1;
 				}else if(rc2 != -1){
 					rc = rc2;
 				}
 				_mosquitto_log_printf(NULL, MOSQ_LOG_SUBSCRIBE, "%s %d %s", context->id, qos, sub);
+
+			}
+			if(!strcmp(sub,"NAMU/SYSTEM")){
+				char slaveInfo[32];
+				strcpy(slaveInfo, "163.180.117.97");
+				getSlaveInfo(slaveInfo);
+				printf("slaveInfo : %s, %s\n",context->id,  slaveInfo);
+				systemPublish(context, slaveInfo);
+				close(context->sock);
 			}
 			_mosquitto_free(sub);
 
@@ -726,7 +789,7 @@ int mqtt3_handle_subscribe(struct mosquitto_db *db, struct mosquitto *context)
 	}
 	if(_mosquitto_send_suback(context, mid, payloadlen, payload)) rc = 1;
 	_mosquitto_free(payload);
-	
+
 #ifdef WITH_PERSISTENCE
 	db->persistence_changes++;
 #endif

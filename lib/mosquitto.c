@@ -72,7 +72,6 @@ int mosquitto_lib_init(void)
 	gettimeofday(&tv, NULL);
 	srand(tv.tv_sec*1000 + tv.tv_usec/1000);
 #endif
-
 	_mosquitto_net_init();
 
 	return MOSQ_ERR_SUCCESS;
@@ -205,6 +204,7 @@ int mosquitto_reinitialise(struct mosquitto *mosq, const char *id, bool clean_se
 	mosq->want_write = false;
 #endif
 #ifdef WITH_THREADING
+	pthread_mutex_init(&mosq->exe_mutex, NULL);
 	pthread_mutex_init(&mosq->callback_mutex, NULL);
 	pthread_mutex_init(&mosq->log_callback_mutex, NULL);
 	pthread_mutex_init(&mosq->state_mutex, NULL);
@@ -945,6 +945,7 @@ int mosquitto_loop(struct mosquitto *mosq, int timeout, int max_packets)
 				{
 					do{
 						rc = mosquitto_loop_read(mosq, max_packets);
+
 						if(rc || mosq->sock == INVALID_SOCKET){
 							return rc;
 						}
@@ -993,7 +994,6 @@ int mosquitto_loop_forever(struct mosquitto *mosq, int timeout, int max_packets)
 	int rc;
 	unsigned int reconnects = 0;
 	unsigned long reconnect_delay;
-
 	if(!mosq) return MOSQ_ERR_INVAL;
 
 	if(mosq->state == mosq_cs_connect_async){

@@ -213,6 +213,40 @@ int mqtt3_handle_publish(struct mosquitto_db *db, struct mosquitto *context)
 		if(payload) _mosquitto_free(payload);
 		return rc;
 	}
+	
+	/* 		System message filtering		*/
+
+
+	if(!strcmp(topic, "NAMU/SLAVE/STATE")){
+		printf("==============================\n");
+		printf("---- Subscribe Slave Node ----\n");
+		printf("#slave		: %s\n", context->id);
+		printf("#topic		: %s\n", topic);
+		printf("#msg		: %s\n", payload);
+		printf("------------------------------\n");
+		printf("==============================\n");
+		updateIPNode(context->id, atoi(payload));
+
+		int index=0, i=5;
+		while(context->id[i]){
+			index =index * 10;
+			index = index + (int)(context->id[i++] - '0');
+		}
+		printf("client id : %s, index = %d\n", context->id, index);
+/*
+		if(pMosq[index]==NULL){
+		printf("index null, client id : %s, index = %d\n", context->id, index);
+			pMosq[index]= (struct mosquitto*)malloc(sizeof(struct mosquitto));
+		}
+			pMosq[index] = context;
+			printf("pMosq->id : %s\n", pMosq[index]->id);
+*/
+	}
+	else if(!strcmp(topic, "NAMU/SYSTEM/PUBLISH")){
+		printf(" RELAY MESSAGE SHOULD SEND\n");
+		relayPublish(db, payload, stored);
+	}
+	/* 		System message filtering		*/
 
 	_mosquitto_log_printf(NULL, MOSQ_LOG_DEBUG, "Received PUBLISH from %s (d%d, q%d, r%d, m%d, '%s', ... (%ld bytes))", context->id, dup, qos, retain, mid, topic, (long)payloadlen);
 	if(qos > 0){

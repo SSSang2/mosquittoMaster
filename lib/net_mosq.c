@@ -993,6 +993,7 @@ int _mosquitto_packet_read(struct mosquitto *mosq)
 #if defined(WITH_BROKER) && defined(WITH_SYS_TREE)
 			g_bytes_received += read_length;
 #endif
+			
 			mosq->in_packet.to_process -= read_length;
 			mosq->in_packet.pos += read_length;
 		}else{

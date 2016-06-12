@@ -1,0 +1,556 @@
+#include "pub_client.h"
+void my_connect_callback_pub(struct mosquitto *mosq, void *obj, int result)
+{
+	int rc = MOSQ_ERR_SUCCESS;
+
+	if(!result){
+		switch(mode){
+			case MSGMODE_CMD:
+			case MSGMODE_FILE:
+			case MSGMODE_STDIN_FILE:
+				rc = mosquitto_publish(mosq, &mid_sent, topic, msglen, message, qos, retain);
+				break;
+			case MSGMODE_NULL:
+				rc = mosquitto_publish(mosq, &mid_sent, topic, 0, NULL, qos, retain);
+				break;
+			case MSGMODE_STDIN_LINE:
+				status = STATUS_CONNACK_RECVD;
+				break;
+		}
+		if(rc){
+			if(!quiet){
+				switch(rc){
+					case MOSQ_ERR_INVAL:
+						fprintf(stderr, "Error: Invalid input. Does your topic contain '+' or '#'?\n");
+						break;
+					case MOSQ_ERR_NOMEM:
+						fprintf(stderr, "Error: Out of memory when trying to publish message.\n");
+						break;
+					case MOSQ_ERR_NO_CONN:
+						fprintf(stderr, "Error: Client not connected when trying to publish.\n");
+						break;
+					case MOSQ_ERR_PROTOCOL:
+						fprintf(stderr, "Error: Protocol error when communicating with broker.\n");
+						break;
+					case MOSQ_ERR_PAYLOAD_SIZE:
+						fprintf(stderr, "Error: Message payload is too large.\n");
+						break;
+				}
+			}
+			mosquitto_disconnect(mosq);
+		}
+	}else{
+		if(result && !quiet){
+			fprintf(stderr, "%s\n", mosquitto_connack_string(result));
+		}
+	}
+}
+
+void my_disconnect_callback_pub(struct mosquitto *mosq, void *obj, int rc)
+{
+	connected = false;
+}
+
+void my_publish_callback(struct mosquitto *mosq, void *obj, int mid)
+{
+	last_mid_sent = mid;
+	if(mode == MSGMODE_STDIN_LINE){
+		if(mid == last_mid){
+			mosquitto_disconnect(mosq);
+			disconnect_sent = true;
+		}
+	}else if(disconnect_sent == false){
+		mosquitto_disconnect(mosq);
+		disconnect_sent = true;
+	}
+}
+
+void my_log_callback_pub(struct mosquitto *mosq, void *obj, int level, const char *str)
+{
+	printf("%s\n", str);
+}
+
+int load_stdin(void)
+{
+	long pos = 0, rlen;
+	char buf[1024];
+	char *aux_message = NULL;
+
+	mode = MSGMODE_STDIN_FILE;
+
+	while(!feof(stdin)){
+		rlen = fread(buf, 1, 1024, stdin);
+		aux_message = realloc(message, pos+rlen);
+		if(!aux_message){
+			if(!quiet) fprintf(stderr, "Error: Out of memory.\n");
+			free(message);
+			return 1;
+		} else
+		{
+			message = aux_message;
+		}
+		memcpy(&(message[pos]), buf, rlen);
+		pos += rlen;
+	}
+	msglen = pos;
+
+	if(!msglen){
+		if(!quiet) fprintf(stderr, "Error: Zero length input.\n");
+		return 1;
+	}
+
+	return 0;
+}
+
+int load_file(const char *filename)
+{
+	long pos, rlen;
+	FILE *fptr = NULL;
+
+	fptr = fopen(filename, "rb");
+	if(!fptr){
+		if(!quiet) fprintf(stderr, "Error: Unable to open file \"%s\".\n", filename);
+		return 1;
+	}
+	mode = MSGMODE_FILE;
+	fseek(fptr, 0, SEEK_END);
+	msglen = ftell(fptr);
+	if(msglen > 268435455){
+		fclose(fptr);
+		if(!quiet) fprintf(stderr, "Error: File \"%s\" is too large (>268,435,455 bytes).\n", filename);
+		return 1;
+	}else if(msglen == 0){
+		fclose(fptr);
+		if(!quiet) fprintf(stderr, "Error: File \"%s\" is empty.\n", filename);
+		return 1;
+	}else if(msglen < 0){
+		fclose(fptr);
+		if(!quiet) fprintf(stderr, "Error: Unable to determine size of file \"%s\".\n", filename);
+		return 1;
+	}
+	fseek(fptr, 0, SEEK_SET);
+	message = malloc(msglen);
+	if(!message){
+		fclose(fptr);
+		if(!quiet) fprintf(stderr, "Error: Out of memory.\n");
+		return 1;
+	}
+	pos = 0;
+	while(pos < msglen){
+		rlen = fread(&(message[pos]), sizeof(char), msglen-pos, fptr);
+		pos += rlen;
+	}
+	fclose(fptr);
+	return 0;
+}
+
+void print_usage_pub(void)
+{
+	int major, minor, revision;
+
+	mosquitto_lib_version(&major, &minor, &revision);
+}
+
+//int publishToMaster(char _host[] ,int _port, char _topic[], char _message[])
+void publishToMaster(struct client_config *p_cfg)
+{
+	struct mosq_config cfg;
+	struct mosquitto *mosq = NULL;
+	int rc;
+	int rc2;
+	char *buf;
+	int buf_len = 1024;
+	int buf_len_actual;
+	int read_len;
+	int pos;
+	char *temp[] = {"mosquitto_puba",};
+	char msgs[256];
+	char cfgId[10];
+
+	buf = malloc(buf_len);
+	if(!buf){
+		fprintf(stderr, "Error: Out of memory.\n");
+		return ;
+	}
+
+	memset(&cfg, 0, sizeof(struct mosq_config));
+
+	
+	rc = client_config_load(&cfg, CLIENT_PUB, 1, temp);
+	if(rc){
+		client_config_cleanup(&cfg);
+		if(rc == 2){
+			print_usage_pub();
+		}else{
+			fprintf(stderr, "\nUse 'mosquitto_pub --help' to see usage.\n");
+		}
+		return ;
+	}
+	sprintf(msgs, "TEST MESSAGE");
+	
+	init_config(cfg);
+	cfg.port = p_cfg->port;
+
+	cfg.host = (char*)malloc(strlen(p_cfg->host));
+	strcpy(cfg.host, p_cfg->host);
+
+	cfg.topic = (char*)malloc(strlen(p_cfg->topic));
+	strcpy(cfg.topic, p_cfg->topic);
+	
+	sprintf(cfgId, "mastera");
+			cfg.id = (char*)malloc(strlen(cfgId));
+			strcpy(cfg.id,cfgId);
+
+			cfg.message = (char*)malloc(strlen(msgs));
+			strcpy(cfg.message, msgs);
+
+			cfg.msglen = strlen(cfg.message);
+			cfg.pub_mode = MSGMODE_STDIN_LINE;
+
+
+			topic = cfg.topic;
+			message = cfg.message;
+			msglen = cfg.msglen;
+			qos = cfg.qos;
+			retain = cfg.retain;
+			mode = cfg.pub_mode;
+			username = cfg.username;
+			password = cfg.password;
+			quiet = cfg.quiet;
+
+
+			if(cfg.pub_mode == MSGMODE_STDIN_FILE){
+					if(load_stdin()){
+							fprintf(stderr, "Error loading input from stdin.\n");
+							return ;
+					}
+			}
+
+			if(!topic || mode == MSGMODE_NONE){
+					printf("a5\n");
+					fprintf(stderr, "Error: Both topic and message must be supplied.\n");
+					print_usage_pub();
+					return ;
+			}
+
+			//mosquitto_lib_init();
+
+			if(client_id_generate(&cfg, "mosqpub")){
+					return ;
+			}
+			mosq = mosquitto_new(cfg.id, true, NULL);
+			mosq->id = strdup(cfgId);
+			masterMosq = mosq;
+			if(!mosq){
+					switch(errno){
+							case ENOMEM:
+									if(!quiet) fprintf(stderr, "Error: Out of memory.\n");
+									break;
+							case EINVAL:
+									if(!quiet) fprintf(stderr, "Error: Invalid id.\n");
+									break;
+					}
+					mosquitto_lib_cleanup();
+					return ;
+			}
+			if(cfg.debug){
+					mosquitto_log_callback_set(mosq, my_log_callback_pub);
+			}
+			mosquitto_connect_callback_set(mosq, my_connect_callback_pub);
+			mosquitto_disconnect_callback_set(mosq, my_disconnect_callback_pub);
+			mosquitto_publish_callback_set(mosq, my_publish_callback);
+
+		/*	
+		   if(client_opts_set(mosq, &cfg)){
+			   return 1;
+			   }
+			*/ 
+
+			rc = client_connect(mosq, &cfg);
+			if(rc) return rc;
+	while(true){
+			//mosquitto_loop_start(mosq);
+			/*
+			printf("===========================================\n");
+			printf("-------------------------------------------\n");
+			printf("		Publish Message to Master\n");
+			printf("#Host		: %s\n", cfg.host);
+			printf("#Port		: %d\n", cfg.port);
+			printf("#topic		: %s\n", topic);
+			printf("#message	: %s\n", message);
+			printf("#msglen		: %d\n", msglen);
+			printf("#qos		: %d\n", qos);
+			printf("#retain		: %d\n", retain);
+			printf("mode		: %d\n", mode);
+			printf("-------------------------------------------\n");
+			printf("===========================================\n");
+			*/
+			message[msglen-1] = '\0';
+			rc2 = mosquitto_publish(mosq, &mid_sent, topic, msglen, message, qos, retain);
+
+		//mosquitto_loop_stop(mosq, false);
+			usleep(1000000);
+		}
+
+			if(mode == MSGMODE_STDIN_LINE){
+					mosquitto_loop_stop(mosq, false);
+			}
+			if(message && mode == MSGMODE_FILE){
+					free(message);
+			}
+			mosquitto_destroy(mosq);
+			mosquitto_lib_cleanup();
+
+			if(rc){
+					fprintf(stderr, "Error: %s\n", mosquitto_strerror(rc));
+			}
+			return ;
+}
+void publishThread(struct client_config *c_cfg){
+		printf("#HOST   : %s\n", c_cfg->host);
+		printf("#PORT    : %d\n", c_cfg->port);
+		printf("#TOPIC   : %s\n", c_cfg->topic);
+		pthread_create(&tid_pub, NULL, (void *)publishToMaster, (void *)c_cfg);
+}
+void systemPublish(struct mosquitto *mosq, char message[]){
+	uint16_t mid_sent =0;
+	char *topic = "NAMU/SYSTEM";
+	int msglen = strlen(message);
+	mid_sent = _mosquitto_mid_generate(mosq);
+	printf("#systemPublish : %s, %s\n", topic, message);
+	_mosquitto_send_publish(mosq, mid_sent, topic, msglen, message, 0, 0, false);
+}
+void relayPublish(struct mosquitto_db *db, char message[], struct mosquitto_msg_store *stored){
+/*
+	uint16_t mid = _mosquitto_mid_generate(masterMosq);
+	char *topic = "NAMU/SYSTEM/PUBLISH/RELAY";
+	int msg_len = strlen(message);
+	printf("============ relay publish ===========\n");
+	printf("masterMosq -> id : %s\n", masterMosq->id);
+	mqtt3_db_message_store(db, masterMosq->id, mid, topic, 0, msg_len, message, 0, &stored, 0);
+	mqtt3_db_messages_queue(db, masterMosq->id, topic, 0, 0, &stored);
+	_mosquitto_send_publish(masterMosq, mid, topic, msg_len, message, 0, 0, false);
+
+*/ 
+
+        MYSQL_RES   *sql_result;
+        MYSQL_ROW   sql_row;
+        int       query_stat;
+
+        char query[255];
+
+	if(connection == NULL){
+        mysql_init(&conn);
+		connection = mysql_real_connect(&conn, DB_HOST,
+				DB_USER, DB_PASS,
+				DB_NAME, 3306,
+				(char *)NULL, 0);
+	}
+        if (connection == NULL)
+        {
+                fprintf(stderr, "Mysql connection error : %s", mysql_error(&conn));
+                return 1;
+        }
+
+        sprintf(query, "select name, sock from slaveList;");
+        query_stat = mysql_query(connection, query);
+        if (query_stat != 0)
+        {
+                fprintf(stderr, "Mysql query error : %s", mysql_error(&conn));
+                return 1;
+        }
+        sql_result = mysql_store_result(connection);
+	//mysql_close(connection);
+	while ( (sql_row = mysql_fetch_row(sql_result)) != NULL )
+	{
+		struct mosquitto *mosq = NULL;
+		struct mosquitto *context = NULL;
+		struct mosq_config cfg;
+		uint16_t mid = 0;//
+		char topic[128];// = "NAMU/SYSTEM/PUBLISH/RELAY\0";
+		char *temp[] = {"mosquitto_master",};
+		struct mosquitto_msg_store *store = NULL;
+		int msg_len = strlen(message);
+		int index=0, i=5;
+		char cfgId[10];
+
+		while(sql_row[0][i]){
+			index *=10;
+			index += (int)(sql_row[0][i++]-'0');
+		}
+		printf("*ID : %s, %d\n", sql_row[0], index);
+		
+		message[msg_len] = '\0';
+		mosq = pMosq[index];
+mosq->state = mosq_cs_new;
+		sprintf(topic, "NAMU/SYSTEM/PUBLISH/RELAY");
+
+/*
+		memset(&cfg, 0, sizeof(struct mosq_config));
+		client_config_load(&cfg, CLIENT_PUB, 1, temp);
+		init_config(cfg);
+		cfg.port = 1883;
+		printf("--------------- 1 -----------------\n");		
+		cfg.host = (char*)malloc(strlen(mosq->address));
+		strcpy(cfg.host, mosq->address);
+		printf("--------------- 2 -----------------\n");		
+		
+		cfg.topic = (char*)malloc(strlen(topic));
+		sprintf(cfg.topic, topic);
+		printf("--------------- 3 -----------------\n");		
+		
+		cfg.message = (char*)malloc(strlen(message));
+		strcpy(cfg.message, message);
+		printf("--------------- 4 -----------------\n");		
+
+		sprintf(cfgId, "master");
+		cfg.id = (char*)malloc(strlen(cfgId));
+		strcpy(cfg.id,cfgId);
+		printf("--------------- 5 -----------------\n");		
+
+		cfg.msglen = strlen(cfg.message);
+		cfg.pub_mode = MSGMODE_STDIN_LINE;
+		printf("--------------- 6 -----------------\n");		
+*/
+		//context = mosquitto_new("master", true, NULL);
+//		context->id = strdup(cfgId);
+		mosquitto_connect_callback_set(mosq, my_connect_callback_pub);
+		mosquitto_disconnect_callback_set(mosq, my_disconnect_callback_pub);
+		mosquitto_publish_callback_set(mosq, my_publish_callback);
+		printf("--------------- 7 -----------------\n");		
+
+//		client_connect(context, &cfg);
+	//	clientConfig(context, p_cfg);
+
+
+		printf("============ relay publish ===========\n");
+		printf("\n\nmasterMosq -> id : %s\n", mosq->id);
+		printf("#masterMosq -> address : %s\n", mosq->address);
+		mosq->port = 1883;
+		printf("#mosq->port : %d\n", mosq->port);
+		//printf("#mosq sockpairW : %d\n", mosq->sockpairW);
+		//printf("#mosq sockpairR : %d\n", mosq->sockpairR);
+		printf("#topic : %s\n", topic);
+		printf("#msglen : %d\n", msg_len);
+		printf("#message : %s\n", message);
+		mid = _mosquitto_mid_generate(mosq);
+		mqtt3_db_message_store(db, mosq->id, mid, topic, 0, msg_len, message, 0, &store, 0);
+		mqtt3_db_messages_queue(db, mosq->id, topic, 0, 0, &store);
+		//printf("#id : %s, sock : %d, mid : %d\n",mosq->id,  mosq->sock, mid);
+		_mosquitto_send_publish(mosq, mid, topic, msg_len, message, 0, 0, false);
+
+	}
+	mysql_free_result(sql_result);
+
+}
+/*
+void clientConfig(struct mosquitto *mosq, struct client_config *p_cfg){
+	struct mosq_config cfg;
+	int rc;
+	int rc2;
+	char *buf;
+	int buf_len = 1024;
+	int buf_len_actual;
+	int read_len;
+	int pos;
+	char *temp[] = {"mosquitto_puba",};
+	char msgs[256];
+	char itoa[10];
+	const char cfgId[10];
+	buf = malloc(buf_len);
+	if(!buf){
+		fprintf(stderr, "Error: Out of memory.\n");
+		return ;
+	}
+	memset(&cfg, 0, sizeof(struct mosq_config));
+
+
+	rc = client_config_load(&cfg, CLIENT_PUB, 1, temp);
+	if(rc){
+		client_config_cleanup(&cfg);
+		if(rc == 2){
+			print_usage_pub();
+		}else{
+			fprintf(stderr, "\nUse 'mosquitto_pub --help' to see usage.\n");
+		}
+		return ;
+	}
+	sprintf(msgs, "Count : ");
+
+	init_config(cfg);
+	cfg.port = p_cfg->port;
+
+	cfg.host = (char*)malloc(strlen(p_cfg->host));
+	strcpy(cfg.host, p_cfg->host);
+
+	cfg.topic = (char*)malloc(strlen(p_cfg->topic));
+	strcpy(cfg.topic, p_cfg->topic);
+	//cfg.topic = strdup(para[1]);
+	cfg.message = (char*)malloc(strlen(msgs));
+	strcpy(cfg.message, msgs);
+
+	sprintf(cfgId, "master");
+	cfg.id = (char*)malloc(strlen(cfgId));
+	strcpy(cfg.id,cfgId);
+
+	cfg.msglen = strlen(cfg.message);
+	cfg.pub_mode = MSGMODE_STDIN_LINE;
+
+	topic = cfg.topic;
+	message = cfg.message;
+	msglen = cfg.msglen;
+	qos = cfg.qos;
+	retain = cfg.retain;
+	mode = cfg.pub_mode;
+	username = cfg.username;
+	password = cfg.password;
+	quiet = cfg.quiet;
+
+
+	if(cfg.pub_mode == MSGMODE_STDIN_FILE){
+		if(load_stdin()){
+			fprintf(stderr, "Error loading input from stdin.\n");
+			return ;
+		}
+	}
+
+	if(!topic || mode == MSGMODE_NONE){
+		printf("a5\n");
+		fprintf(stderr, "Error: Both topic and message must be supplied.\n");
+		print_usage_pub();
+		return ;
+	}
+
+	//mosquitto_lib_init();
+
+	if(client_id_generate(&cfg, "master")){
+		return ;
+	}
+
+	mosq = mosquitto_new("master", true, NULL);
+	mosq->id = strdup(cfgId);
+
+	printf("#id : %s, %s\n", mosq->id, cfgId);
+
+	if(!mosq){
+		switch(errno){
+			case ENOMEM:
+				if(!quiet) fprintf(stderr, "Error: Out of memory.\n");
+				break;
+			case EINVAL:
+				if(!quiet) fprintf(stderr, "Error: Invalid id.\n");
+				break;
+		}
+		mosquitto_lib_cleanup();
+		return ;
+	}
+	if(cfg.debug){
+		mosquitto_log_callback_set(mosq, my_log_callback_pub);
+	}
+	mosquitto_connect_callback_set(mosq, my_connect_callback_pub);
+	mosquitto_disconnect_callback_set(mosq, my_disconnect_callback_pub);
+	mosquitto_publish_callback_set(mosq, my_publish_callback);
+
+	rc = client_connect(mosq, &cfg);
+}
+*/

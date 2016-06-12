@@ -143,9 +143,7 @@ struct mosquitto_message_all{
 
 struct mosquitto {
 	mosq_sock_t sock;
-#ifndef WITH_BROKER
 	mosq_sock_t sockpairR, sockpairW;
-#endif
 	enum _mosquitto_protocol protocol;
 	char *address;
 	char *id;
@@ -161,7 +159,6 @@ struct mosquitto {
 	struct _mosquitto_packet *current_out_packet;
 	struct _mosquitto_packet *out_packet;
 	struct mosquitto_message *will;
-#ifdef WITH_TLS
 	SSL *ssl;
 	SSL_CTX *ssl_ctx;
 	char *tls_cafile;
@@ -175,10 +172,9 @@ struct mosquitto {
 	char *tls_psk_identity;
 	int tls_cert_reqs;
 	bool tls_insecure;
-#endif
 	bool want_write;
 	bool want_connect;
-#if defined(WITH_THREADING) && !defined(WITH_BROKER)
+	pthread_mutex_t exe_mutex;
 	pthread_mutex_t callback_mutex;
 	pthread_mutex_t log_callback_mutex;
 	pthread_mutex_t msgtime_mutex;
@@ -189,9 +185,7 @@ struct mosquitto {
 	pthread_mutex_t out_message_mutex;
 	pthread_mutex_t mid_mutex;
 	pthread_t thread_id;
-#endif
 	bool clean_session;
-#ifdef WITH_BROKER
 	bool is_dropping;
 	bool is_bridge;
 	struct _mqtt3_bridge *bridge;
@@ -206,17 +200,12 @@ struct mosquitto {
 	struct _mosquitto_subhier **subs;
 	int sub_count;
 	int pollfd_index;
-#  ifdef WITH_WEBSOCKETS
 	struct libwebsocket_context *ws_context;
 	struct libwebsocket *wsi;
-#  endif
-#else
-#  ifdef WITH_SOCKS
 	char *socks5_host;
 	int socks5_port;
 	char *socks5_username;
 	char *socks5_password;
-#  endif
 	void *userdata;
 	bool in_callback;
 	unsigned int message_retry;
@@ -242,14 +231,12 @@ struct mosquitto {
 	unsigned int reconnect_delay_max;
 	bool reconnect_exponential_backoff;
 	bool threaded;
-	struct _mosquitto_packet *out_packet_last;
+	//struct _mosquitto_packet *out_packet_last;
 	int inflight_messages;
 	int max_inflight_messages;
-#  ifdef WITH_SRV
+# ifdef WITH_SRV
 	ares_channel achan;
-#  endif
-#endif
-
+# endif
 #ifdef WITH_BROKER
 	UT_hash_handle hh_id;
 	UT_hash_handle hh_sock;

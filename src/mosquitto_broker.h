@@ -40,7 +40,10 @@ Contributors:
 #define MQTT3_LOG_ALL 0xFF
 
 #define WEBSOCKET_CLIENT -2
-
+#define MAX_CLIENT 2
+int *sCount; 
+struct mosquitto *pMosq[100];
+struct mosquitto *pContext[100];
 enum mosquitto_protocol {
 	mp_mqtt,
 	mp_mqttsn,

@@ -49,6 +49,9 @@ Contributors:
 #include <mosquitto_broker.h>
 #include <memory_mosq.h>
 #include "util_mosq.h"
+//#include "pub_client.c"
+//#include "sub_client.c"
+#include "management.h"
 
 struct mosquitto_db int_db;
 
@@ -180,7 +183,29 @@ void handle_sigusr2(int signal)
 {
 	flag_tree_print = true;
 }
-
+/*
+void _itoa(int a, char* buf){
+        int tmp = a;
+        char result[100];
+        int i=0, j=0;
+        int b=0;
+        memset(result, NULL, sizeof(result));
+        if(a>0){
+                while(tmp>0){
+                        b = tmp % 10;
+                        result[i++] = (char)(b+'0');
+                        tmp /= 10;
+                }
+                for(j=0; j<i; j++)
+                        buf[j] = result[i-j-1];
+                buf[i] = '\0';
+        }
+        else{
+                buf[0] = '0';
+                buf[1] = '\0';
+        }
+}
+*/
 int main(int argc, char *argv[])
 {
 	mosq_sock_t *listensock = NULL;
@@ -201,7 +226,8 @@ int main(int argc, char *argv[])
 	struct timeval tv;
 #endif
 	struct mosquitto *ctxt, *ctxt_tmp;
-
+	//struct client_config *pub_config;
+	//struct client_config *sub_config;
 #if defined(WIN32) || defined(__CYGWIN__)
 	if(argc == 2){
 		if(!strcmp(argv[1], "run")){
@@ -216,6 +242,7 @@ int main(int argc, char *argv[])
 		}
 	}
 #endif
+
 
 
 #ifdef WIN32
@@ -339,6 +366,22 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	/*		Regist Slave Broker		*/
+	sCount= (int*)malloc(sizeof(int));
+	*sCount = 0;
+	deleteAllSlave();
+	if(!checkSlaveId("Slave1")){
+		registSlave("Slave1");
+	}
+/*
+	if(!checkSlaveId("Slave2")){
+		registSlave("Slave2");
+	}
+	if(!checkSlaveId("Slave3")){
+		registSlave("Slave3");
+	}
+	/*		Regist Slave Broker		*/
+
 	rc = drop_privileges(&config, false);
 	if(rc != MOSQ_ERR_SUCCESS) return rc;
 
@@ -366,6 +409,16 @@ int main(int argc, char *argv[])
 	rc = mosquitto_main_loop(&int_db, listensock, listensock_count, listener_max);
 
 	_mosquitto_log_printf(NULL, MOSQ_LOG_INFO, "mosquitto version %s terminating", VERSION);
+	printf("sCount : %d\n", *sCount);
+	for(i=0; i<*sCount; i++){
+		char command[20];
+		char temp[10];
+		_itoa(i+1, temp);
+		strcpy(command, "docker stop Slave");
+		strcat(command, temp);
+		printf("Commad : %s\n", command);
+		system(command);
+	}
 	mqtt3_log_close(&config);
 
 #ifdef WITH_PERSISTENCE
